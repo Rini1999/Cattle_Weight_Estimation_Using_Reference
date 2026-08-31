@@ -1,0 +1,4 @@
+models/stage-1.pkl filter=lfs diff=lfs merge=lfs -text
+models/stage-2.pkl filter=lfs diff=lfs merge=lfs -text
+models/best_keypoint_resnet50_unet_side.pth filter=lfs diff=lfs merge=lfs -text
+models/best_keypoint_resnet50_unet_rear.pth filter=lfs diff=lfs merge=lfs -text
