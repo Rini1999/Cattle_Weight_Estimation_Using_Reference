@@ -1,3 +1,17 @@
+import sys
+import fastai
+import fastcore
+import torch
+
+print("========== ENVIRONMENT DEBUG ==========", flush=True)
+print(f"Python executable: {sys.executable}", flush=True)
+print(f"Python version: {sys.version}", flush=True)
+print(f"fastai version: {fastai.__version__}", flush=True)
+print(f"fastai location: {fastai.__file__}", flush=True)
+print(f"fastcore location: {fastcore.__file__}", flush=True)
+print(f"torch version: {torch.__version__}", flush=True)
+print(f"torch location: {torch.__file__}", flush=True)
+print("========================================", flush=True)
 import os
 import pathlib
 
