@@ -1,4 +1,3 @@
-```python
 import numpy as np
 import torch
 import cv2
@@ -426,4 +425,4 @@ def dist_in_inches(
         p1,
         p2
     ) * scale
-```
+
