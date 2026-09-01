@@ -8,8 +8,8 @@ import pathlib
 # The fastai model files contain serialized pathlib
 # objects from a different operating system.
 #
-# Windows  -> convert serialized PosixPath to WindowsPath
-# Linux    -> convert serialized WindowsPath to PosixPath
+# Windows -> convert serialized PosixPath to WindowsPath
+# Linux   -> convert serialized WindowsPath to PosixPath
 #
 # Do NOT replace pathlib.Path itself.
 # ---------------------------------------------------
@@ -20,6 +20,7 @@ if os.name == "nt":
 else:
     # Running on Linux / Streamlit Community Cloud
     pathlib.WindowsPath = pathlib.PosixPath
+
 
 import numpy as np
 import torch
@@ -44,7 +45,10 @@ torch.set_num_threads(1)
 
 def load_learner_cross_platform(model_path):
 
-    print(f"Loading model: {model_path}", flush=True)
+    print(
+        f"Loading model: {model_path}",
+        flush=True
+    )
 
     try:
 
@@ -109,22 +113,28 @@ def load_segmentation_models():
         flush=True
     )
 
-    return side_seg_model, rear_seg_model
+    return (
+        side_seg_model,
+        rear_seg_model
+    )
 
 
 # ---------------------------------------------------
-# CLEAN MASK
+# KEEP LARGEST COMPONENT
 # ---------------------------------------------------
 
 def keep_largest_component(mask):
 
+    mask = mask.astype(np.uint8)
+
     contours, _ = cv2.findContours(
-        mask.astype(np.uint8),
+        mask,
         cv2.RETR_EXTERNAL,
         cv2.CHAIN_APPROX_SIMPLE
     )
 
     if len(contours) == 0:
+
         return mask
 
     largest = max(
@@ -157,12 +167,22 @@ def get_segmentation_masks(
 
     try:
 
-        image = ImageOps.exif_transpose(image)
+        # ---------------------------------------------------
+        # FIX IMAGE ORIENTATION
+        # ---------------------------------------------------
+
+        image = ImageOps.exif_transpose(
+            image
+        )
 
         print(
             f"Running segmentation for {view_type}...",
             flush=True
         )
+
+        # ---------------------------------------------------
+        # ORIGINAL IMAGE SIZE
+        # ---------------------------------------------------
 
         original_w, original_h = image.size
 
@@ -173,7 +193,14 @@ def get_segmentation_masks(
         )
 
         # ---------------------------------------------------
-        # NO MANUAL RESIZING
+        # DO NOT MANUALLY RESIZE
+        # ---------------------------------------------------
+        #
+        # FastAI's saved learner contains the transforms
+        # that were used during training.
+        #
+        # Therefore, pass the original PIL image to
+        # test_dl().
         # ---------------------------------------------------
 
         inference_image = image
@@ -181,11 +208,43 @@ def get_segmentation_masks(
         # ---------------------------------------------------
         # FASTAI TEST DATALOADER
         # ---------------------------------------------------
+        #
+        # IMPORTANT:
+        # num_workers=0 prevents FastAI/PyTorch from
+        # creating worker processes on Streamlit Community
+        # Cloud.
+        #
+        # This fixes:
+        #
+        # Caught TypeError in DataLoader worker process 0
+        #
+        # and:
+        #
+        # TypeError:
+        # 'torch._C._TensorMeta' object does not support
+        # the asynchronous context manager protocol
+        # ---------------------------------------------------
+
+        print(
+            "Creating FastAI test DataLoader "
+            "with num_workers=0...",
+            flush=True
+        )
 
         dl = model.dls.test_dl(
             [inference_image],
-            bs=1
+            bs=1,
+            num_workers=0
         )
+
+        print(
+            "Test DataLoader created successfully.",
+            flush=True
+        )
+
+        # ---------------------------------------------------
+        # RUN INFERENCE
+        # ---------------------------------------------------
 
         print(
             "Running inference...",
@@ -202,7 +261,35 @@ def get_segmentation_masks(
         )
 
         # ---------------------------------------------------
-        # PREDICTION MASK
+        # CHECK PREDICTION
+        # ---------------------------------------------------
+
+        if preds is None:
+
+            print(
+                "Prediction output is None.",
+                flush=True
+            )
+
+            return None, None
+
+        if len(preds) == 0:
+
+            print(
+                "Prediction output is empty.",
+                flush=True
+            )
+
+            return None, None
+
+        print(
+            f"Prediction tensor shape = "
+            f"{preds.shape}",
+            flush=True
+        )
+
+        # ---------------------------------------------------
+        # CONVERT PREDICTION TO CLASS MASK
         # ---------------------------------------------------
 
         pred_mask = (
@@ -226,7 +313,7 @@ def get_segmentation_masks(
         )
 
         # ---------------------------------------------------
-        # RESIZE BACK TO ORIGINAL SIZE
+        # RESIZE MASK TO ORIGINAL IMAGE SIZE
         # ---------------------------------------------------
 
         if (
@@ -237,7 +324,10 @@ def get_segmentation_masks(
 
             pred_mask = cv2.resize(
                 pred_mask,
-                (original_w, original_h),
+                (
+                    original_w,
+                    original_h
+                ),
                 interpolation=cv2.INTER_NEAREST
             )
 
@@ -247,7 +337,7 @@ def get_segmentation_masks(
             )
 
         # ---------------------------------------------------
-        # GET VOCAB SAFELY
+        # GET VOCAB
         # ---------------------------------------------------
 
         vocab = getattr(
@@ -270,23 +360,37 @@ def get_segmentation_masks(
         )
 
         # ---------------------------------------------------
-        # CLASS INDEX RESOLUTION
+        # CLASS INDEX VARIABLES
         # ---------------------------------------------------
 
         sticker_idx = None
         cattle_idx = None
 
+        # ---------------------------------------------------
+        # RESOLVE CLASS INDICES
+        # ---------------------------------------------------
+
         if vocab is not None:
 
-            # numpy array case
+            # -----------------------------------------------
+            # NumPy array
+            # -----------------------------------------------
 
-            if isinstance(vocab, np.ndarray):
+            if isinstance(
+                vocab,
+                np.ndarray
+            ):
 
                 vocab = vocab.tolist()
 
-            # list / tuple case
+            # -----------------------------------------------
+            # List / tuple
+            # -----------------------------------------------
 
-            if isinstance(vocab, (list, tuple)):
+            if isinstance(
+                vocab,
+                (list, tuple)
+            ):
 
                 if "Cattle" in vocab:
 
@@ -300,9 +404,14 @@ def get_segmentation_masks(
                         "Sticker"
                     )
 
-            # fastai CategoryMap case
+            # -----------------------------------------------
+            # FastAI CategoryMap
+            # -----------------------------------------------
 
-            elif hasattr(vocab, "o2i"):
+            elif hasattr(
+                vocab,
+                "o2i"
+            ):
 
                 if "Cattle" in vocab.o2i:
 
@@ -317,15 +426,24 @@ def get_segmentation_masks(
                     ]
 
         # ---------------------------------------------------
-        # MANUAL FALLBACKS
+        # MANUAL FALLBACK CLASS INDICES
+        # ---------------------------------------------------
+        #
+        # Side model:
+        #   0 = Sticker
+        #   1 = Cattle
+        #   2 = Background
+        #   3 = Void
+        #
+        # Rear model:
+        #   0 = Cattle
+        #   1 = Background
+        #   2 = Void
         # ---------------------------------------------------
 
         if cattle_idx is None:
 
             if view_type == "Side":
-
-                # Sticker, Cattle,
-                # Background, Void
 
                 cattle_idx = 1
 
@@ -334,10 +452,6 @@ def get_segmentation_masks(
                     sticker_idx = 0
 
             else:
-
-                # Cattle,
-                # Background,
-                # Void
 
                 cattle_idx = 0
 
@@ -354,7 +468,7 @@ def get_segmentation_masks(
         )
 
         # ---------------------------------------------------
-        # CATTLE MASK
+        # CREATE CATTLE MASK
         # ---------------------------------------------------
 
         cattle_mask = (
@@ -362,30 +476,53 @@ def get_segmentation_masks(
         ).astype(np.uint8)
 
         # ---------------------------------------------------
-        # CLEANUP
+        # MORPHOLOGICAL CLEANUP
         # ---------------------------------------------------
+
+        kernel = np.ones(
+            (3, 3),
+            np.uint8
+        )
 
         cattle_mask = cv2.morphologyEx(
             cattle_mask,
             cv2.MORPH_OPEN,
-            np.ones(
-                (3, 3),
-                np.uint8
-            )
+            kernel
         )
+
+        # ---------------------------------------------------
+        # KEEP LARGEST CATTLE COMPONENT
+        # ---------------------------------------------------
 
         cattle_mask = keep_largest_component(
             cattle_mask
         )
 
+        cattle_area = int(
+            np.sum(cattle_mask)
+        )
+
         print(
             f"Cattle mask area = "
-            f"{np.sum(cattle_mask)}",
+            f"{cattle_area}",
             flush=True
         )
 
         # ---------------------------------------------------
-        # STICKER MASK
+        # VALIDATE CATTLE MASK
+        # ---------------------------------------------------
+
+        if cattle_area == 0:
+
+            print(
+                "WARNING: Cattle mask is empty.",
+                flush=True
+            )
+
+            return None, None
+
+        # ---------------------------------------------------
+        # CREATE STICKER MASK
         # ---------------------------------------------------
 
         sticker_mask = None
@@ -404,11 +541,26 @@ def get_segmentation_masks(
                 sticker_mask
             )
 
+            sticker_area = int(
+                np.sum(sticker_mask)
+            )
+
             print(
                 f"Sticker mask area = "
-                f"{np.sum(sticker_mask)}",
+                f"{sticker_area}",
                 flush=True
             )
+
+            if sticker_area == 0:
+
+                print(
+                    "WARNING: Sticker mask is empty.",
+                    flush=True
+                )
+
+        # ---------------------------------------------------
+        # FINISHED
+        # ---------------------------------------------------
 
         print(
             f"Segmentation finished for "
@@ -416,17 +568,28 @@ def get_segmentation_masks(
             flush=True
         )
 
-        return sticker_mask, cattle_mask
+        return (
+            sticker_mask,
+            cattle_mask
+        )
 
     except Exception as e:
 
         print(
             f"Segmentation Error "
-            f"({view_type}): {e}",
+            f"({view_type}): "
+            f"{type(e).__name__}: {e}",
             flush=True
         )
 
-        return None, None
+        import traceback
+
+        traceback.print_exc()
+
+        return (
+            None,
+            None
+        )
 
 
 # ---------------------------------------------------
@@ -466,23 +629,48 @@ def compute_scale_from_sticker(
 
         return None
 
+    # ---------------------------------------------------
+    # LARGEST STICKER COMPONENT
+    # ---------------------------------------------------
+
     cnt = max(
         contours,
         key=cv2.contourArea
     )
 
-    x, y, w, h = cv2.boundingRect(cnt)
+    x, y, w, h = cv2.boundingRect(
+        cnt
+    )
 
-    sticker_px = max(w, h)
+    sticker_px = max(
+        w,
+        h
+    )
 
     print(
-        f"Sticker pixels = {sticker_px}",
+        f"Sticker bounding box = "
+        f"{w} x {h}",
         flush=True
     )
 
-    if sticker_px == 0:
+    print(
+        f"Sticker pixels = "
+        f"{sticker_px}",
+        flush=True
+    )
+
+    if sticker_px <= 0:
+
+        print(
+            "Sticker pixel size is zero.",
+            flush=True
+        )
 
         return None
+
+    # ---------------------------------------------------
+    # PIXELS -> INCHES
+    # ---------------------------------------------------
 
     scale = (
         sticker_size_in /
@@ -490,7 +678,8 @@ def compute_scale_from_sticker(
     )
 
     print(
-        f"Computed scale = {scale}",
+        f"Computed scale = "
+        f"{scale}",
         flush=True
     )
 
@@ -522,4 +711,3 @@ def dist_in_inches(
         p1,
         p2
     ) * scale
-
