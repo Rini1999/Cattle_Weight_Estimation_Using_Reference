@@ -19,9 +19,16 @@ import fastai.vision.core
 import fasttransform
 import fasttransform.transform
 
+st.write("========== MODULE PATH DEBUG ==========")
+st.write("Python:", sys.version)
+st.write("fastai:", fastai.__version__)
+st.write("fastai path:", fastai.__file__)
 st.write("fastai vision core path:", fastai.vision.core.__file__)
 st.write("fasttransform path:", fasttransform.__file__)
-st.write("fasttransform transform path:", fasttransform.transform.__file__)
+st.write(
+    "fasttransform transform path:",
+    fasttransform.transform.__file__
+)
 
 import streamlit as st
 import numpy as np
