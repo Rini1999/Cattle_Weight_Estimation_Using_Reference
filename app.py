@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import pathlib
 import joblib
 
 from PIL import Image
@@ -9,13 +8,6 @@ from PIL import Image
 from segmentation import load_segmentation_models
 from keypoint_detection import load_keypoint_models
 from feature_extraction import extract_features
-
-# ---------------------------------------------------
-# WINDOWS FIX
-# ---------------------------------------------------
-
-temp = pathlib.PosixPath
-pathlib.PosixPath = pathlib.WindowsPath
 
 # ---------------------------------------------------
 # PAGE CONFIG

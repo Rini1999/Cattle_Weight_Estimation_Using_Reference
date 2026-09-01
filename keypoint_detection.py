@@ -5,29 +5,32 @@ import numpy as np
 
 from torchvision import transforms, models
 
-device = torch.device(
-    "cuda" if torch.cuda.is_available()
-    else "cpu"
-)
+
+# ---------------------------------------------------
+# DEVICE
+# ---------------------------------------------------
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # ---------------------------------------------------
 # TRANSFORM
 # ---------------------------------------------------
+
 transform = transforms.Compose([
-
     transforms.Resize((256, 256)),
-
     transforms.ToTensor(),
-
     transforms.Normalize(
         mean=[0.485, 0.456, 0.406],
         std=[0.229, 0.224, 0.225]
     )
 ])
 
+
 # ---------------------------------------------------
 # DECODER BLOCK
 # ---------------------------------------------------
+
 class DecoderBlock(nn.Module):
 
     def __init__(self, in_c, skip_c, out_c):
@@ -72,18 +75,23 @@ class DecoderBlock(nn.Module):
 
         return self.conv(x)
 
+
 # ---------------------------------------------------
 # RESNET50 U-NET
 # ---------------------------------------------------
+
 class ResNet50_UNet(nn.Module):
 
     def __init__(self, num_keypoints):
 
         super().__init__()
 
-        resnet = models.resnet50(
-            weights=models.ResNet50_Weights.IMAGENET1K_V1
-        )
+        # IMPORTANT:
+        # Do NOT download ImageNet weights.
+        # The trained .pth file already contains
+        # the weights required by this model.
+
+        resnet = models.resnet50(weights=None)
 
         self.enc0 = nn.Sequential(
             resnet.conv1,
@@ -167,47 +175,73 @@ class ResNet50_UNet(nn.Module):
 
         return x
 
+
 # ---------------------------------------------------
-# LOAD MODELS
+# LOAD KEYPOINT MODELS
 # ---------------------------------------------------
+
 def load_keypoint_models():
+
+    print("Creating side keypoint model...")
 
     side = ResNet50_UNet(9)
 
+    print("Loading side keypoint weights...")
+
+    side_state = torch.load(
+        "models/best_keypoint_resnet50_unet_side.pth",
+        map_location=device
+    )
+
+    side.load_state_dict(side_state)
+
+    print("Side keypoint model loaded.")
+
+
+    print("Creating rear keypoint model...")
+
     rear = ResNet50_UNet(4)
 
-    side.load_state_dict(
-        torch.load(
-            'models/best_keypoint_resnet50_unet_side.pth',
-            map_location=device
-        )
+    print("Loading rear keypoint weights...")
+
+    rear_state = torch.load(
+        "models/best_keypoint_resnet50_unet_rear.pth",
+        map_location=device
     )
 
-    rear.load_state_dict(
-        torch.load(
-            'models/best_keypoint_resnet50_unet_rear.pth',
-            map_location=device
-        )
-    )
+    rear.load_state_dict(rear_state)
 
-    side.eval().to(device)
+    print("Rear keypoint model loaded.")
 
-    rear.eval().to(device)
+
+    side = side.to(device)
+    rear = rear.to(device)
+
+    side.eval()
+    rear.eval()
+
+    print("Keypoint models loaded successfully.")
 
     return side, rear
+
 
 # ---------------------------------------------------
 # GET KEYPOINTS
 # ---------------------------------------------------
+
 def get_keypoints(model, image):
 
     orig_w, orig_h = image.size
 
-    img_tensor = transform(image).unsqueeze(0).to(device)
+    img_tensor = transform(
+        image
+    ).unsqueeze(0).to(device)
 
     with torch.no_grad():
 
-        heatmaps = model(img_tensor)[0].cpu()
+        heatmaps = model(
+            img_tensor
+        )[0].cpu()
 
     coords = []
 
