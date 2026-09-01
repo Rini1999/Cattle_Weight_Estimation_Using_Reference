@@ -1,6 +1,18 @@
+```python
 import numpy as np
 import torch
 import cv2
+import pathlib
+
+# ---------------------------------------------------
+# WINDOWS PATH COMPATIBILITY
+# ---------------------------------------------------
+# The FastAI .pkl models were saved on Windows and
+# may contain pathlib.WindowsPath objects.
+# Streamlit Cloud runs on Linux, so map WindowsPath
+# to the Linux-compatible PosixPath during loading.
+
+pathlib.WindowsPath = pathlib.PosixPath
 
 from PIL import ImageOps
 from fastai.vision.all import load_learner
@@ -414,3 +426,4 @@ def dist_in_inches(
         p1,
         p2
     ) * scale
+```
