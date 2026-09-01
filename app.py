@@ -1,3 +1,19 @@
+import sys
+import fastai
+import fastcore
+import torch
+import torchvision
+
+st.write("Python:", sys.version)
+st.write("Python executable:", sys.executable)
+st.write("fastai:", fastai.__version__)
+st.write("fastai path:", fastai.__file__)
+st.write("fastcore path:", fastcore.__file__)
+st.write("torch:", torch.__version__)
+st.write("torch path:", torch.__file__)
+st.write("torchvision:", torchvision.__version__)
+st.write("torchvision path:", torchvision.__file__)
+
 import streamlit as st
 import numpy as np
 import pandas as pd
