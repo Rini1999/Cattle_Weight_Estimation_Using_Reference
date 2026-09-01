@@ -1,25 +1,31 @@
+import os
+import pathlib
+
+# ---------------------------------------------------
+# CROSS-PLATFORM PATH FIX
+# ---------------------------------------------------
+# FastAI/PyTorch pickle files may contain pathlib paths
+# created on a different operating system.
+#
+# Windows:
+#     PosixPath -> WindowsPath
+#
+# Linux / Streamlit Cloud:
+#     WindowsPath -> PosixPath
+# ---------------------------------------------------
+
+if os.name == "nt":
+    pathlib.PosixPath = pathlib.WindowsPath
+else:
+    pathlib.WindowsPath = pathlib.PosixPath
+
+
 import numpy as np
 import torch
 import cv2
-import pathlib
-import os
 
 from PIL import ImageOps
 from fastai.vision.all import load_learner
-
-
-# ---------------------------------------------------
-# WINDOWS -> LINUX PATH COMPATIBILITY
-# ---------------------------------------------------
-# The FastAI .pkl models were saved on Windows and may
-# contain pathlib.WindowsPath objects. Streamlit Cloud
-# runs Linux, where WindowsPath cannot be instantiated.
-#
-# Convert WindowsPath references to PosixPath during
-# model deserialization.
-
-if os.name != "nt":
-    pathlib.WindowsPath._flavour = pathlib.PosixPath._flavour
 
 
 # ---------------------------------------------------
@@ -32,27 +38,15 @@ torch.set_num_threads(1)
 
 
 # ---------------------------------------------------
-# MODEL PATHS
-# ---------------------------------------------------
-
-SIDE_MODEL_PATH = os.path.join(
-    "models",
-    "stage-1.pkl"
-)
-
-REAR_MODEL_PATH = os.path.join(
-    "models",
-    "stage-2.pkl"
-)
-
-
-# ---------------------------------------------------
 # LOAD SEGMENTATION MODELS
 # ---------------------------------------------------
 
 def load_segmentation_models():
 
-    print("Loading side segmentation model...", flush=True)
+    print(
+        "Loading side segmentation model...",
+        flush=True
+    )
 
     side_seg_model = load_learner(
         "models/stage-1.pkl",
@@ -80,7 +74,7 @@ def load_segmentation_models():
     )
 
     print(
-        "Segmentation models loaded successfully.",
+        "Segmentation models loaded.",
         flush=True
     )
 
@@ -251,15 +245,19 @@ def get_segmentation_masks(
 
         if vocab is not None:
 
-            # NumPy array case
+            # ---------------------------------------------------
+            # NUMPY ARRAY CASE
+            # ---------------------------------------------------
 
             if isinstance(vocab, np.ndarray):
 
                 vocab = vocab.tolist()
 
-            # List case
+            # ---------------------------------------------------
+            # LIST / TUPLE CASE
+            # ---------------------------------------------------
 
-            if isinstance(vocab, list):
+            if isinstance(vocab, (list, tuple)):
 
                 if "Cattle" in vocab:
 
@@ -267,11 +265,18 @@ def get_segmentation_masks(
                         "Cattle"
                     )
 
+                elif "cattle" in vocab:
+
+                    cattle_idx = vocab.index(
+                        "cattle"
+                    )
+
                 else:
 
-                    raise ValueError(
-                        f"'Cattle' class not found "
-                        f"in model vocabulary: {vocab}"
+                    cattle_idx = (
+                        1
+                        if view_type == "Side"
+                        else 0
                     )
 
                 if "Sticker" in vocab:
@@ -280,7 +285,15 @@ def get_segmentation_masks(
                         "Sticker"
                     )
 
-            # FastAI CategoryMap case
+                elif "sticker" in vocab:
+
+                    sticker_idx = vocab.index(
+                        "sticker"
+                    )
+
+            # ---------------------------------------------------
+            # FASTAI CATEGORYMAP CASE
+            # ---------------------------------------------------
 
             elif hasattr(vocab, "o2i"):
 
@@ -290,11 +303,18 @@ def get_segmentation_masks(
                         "Cattle"
                     ]
 
+                elif "cattle" in vocab.o2i:
+
+                    cattle_idx = vocab.o2i[
+                        "cattle"
+                    ]
+
                 else:
 
-                    raise ValueError(
-                        f"'Cattle' class not found "
-                        f"in model vocabulary: {vocab.o2i}"
+                    cattle_idx = (
+                        1
+                        if view_type == "Side"
+                        else 0
                     )
 
                 if "Sticker" in vocab.o2i:
@@ -303,9 +323,17 @@ def get_segmentation_masks(
                         "Sticker"
                     ]
 
-            else:
+                elif "sticker" in vocab.o2i:
 
-                # Fallback
+                    sticker_idx = vocab.o2i[
+                        "sticker"
+                    ]
+
+            # ---------------------------------------------------
+            # FALLBACK
+            # ---------------------------------------------------
+
+            else:
 
                 if view_type == "Side":
 
@@ -324,17 +352,14 @@ def get_segmentation_masks(
 
             if view_type == "Side":
 
-                # Sticker, Cattle,
-                # Background, Void
+                # Sticker, Cattle, Background, Void
 
                 sticker_idx = 0
                 cattle_idx = 1
 
             else:
 
-                # Cattle,
-                # Background,
-                # Void
+                # Cattle, Background, Void
 
                 cattle_idx = 0
 
@@ -359,13 +384,16 @@ def get_segmentation_masks(
         ).astype(np.uint8)
 
         # ---------------------------------------------------
-        # CLEANUP
+        # MORPHOLOGICAL CLEANUP
         # ---------------------------------------------------
 
         cattle_mask = cv2.morphologyEx(
             cattle_mask,
             cv2.MORPH_OPEN,
-            np.ones((3, 3), np.uint8)
+            np.ones(
+                (3, 3),
+                np.uint8
+            )
         )
 
         cattle_mask = keep_largest_component(
@@ -409,7 +437,10 @@ def get_segmentation_masks(
             flush=True
         )
 
-        return sticker_mask, cattle_mask
+        return (
+            sticker_mask,
+            cattle_mask
+        )
 
     except Exception as e:
 
@@ -419,7 +450,7 @@ def get_segmentation_masks(
             flush=True
         )
 
-        raise
+        return None, None
 
 
 # ---------------------------------------------------
@@ -466,7 +497,10 @@ def compute_scale_from_sticker(
 
     x, y, w, h = cv2.boundingRect(cnt)
 
-    sticker_px = max(w, h)
+    sticker_px = max(
+        w,
+        h
+    )
 
     print(
         f"Sticker pixels = {sticker_px}",
@@ -478,8 +512,8 @@ def compute_scale_from_sticker(
         return None
 
     scale = (
-        sticker_size_in /
-        float(sticker_px)
+        sticker_size_in
+        / float(sticker_px)
     )
 
     print(
@@ -500,8 +534,8 @@ def euclidean(
 ):
 
     return np.linalg.norm(
-        np.array(p1) -
-        np.array(p2)
+        np.array(p1)
+        - np.array(p2)
     )
 
 
@@ -515,3 +549,4 @@ def dist_in_inches(
         p1,
         p2
     ) * scale
+
