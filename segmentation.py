@@ -2,19 +2,25 @@ import numpy as np
 import torch
 import cv2
 import pathlib
-
-# ---------------------------------------------------
-# WINDOWS PATH COMPATIBILITY
-# ---------------------------------------------------
-# The FastAI .pkl models were saved on Windows and
-# may contain pathlib.WindowsPath objects.
-# Streamlit Cloud runs on Linux, so map WindowsPath
-# to the Linux-compatible PosixPath during loading.
-
-pathlib.WindowsPath = pathlib.PosixPath
+import os
 
 from PIL import ImageOps
 from fastai.vision.all import load_learner
+
+
+# ---------------------------------------------------
+# WINDOWS -> LINUX PATH COMPATIBILITY
+# ---------------------------------------------------
+# The FastAI .pkl models were saved on Windows and may
+# contain pathlib.WindowsPath objects. Streamlit Cloud
+# runs Linux, where WindowsPath cannot be instantiated.
+#
+# Convert WindowsPath references to PosixPath during
+# model deserialization.
+
+if os.name != "nt":
+    pathlib.WindowsPath = pathlib.PosixPath
+
 
 # ---------------------------------------------------
 # CPU / PERFORMANCE SETTINGS
@@ -24,27 +30,68 @@ cv2.setNumThreads(0)
 
 torch.set_num_threads(1)
 
+
+# ---------------------------------------------------
+# MODEL PATHS
+# ---------------------------------------------------
+
+SIDE_MODEL_PATH = os.path.join(
+    "models",
+    "stage-1.pkl"
+)
+
+REAR_MODEL_PATH = os.path.join(
+    "models",
+    "stage-2.pkl"
+)
+
+
 # ---------------------------------------------------
 # LOAD SEGMENTATION MODELS
 # ---------------------------------------------------
 
 def load_segmentation_models():
 
-    print("Loading side segmentation model...")
+    print("Loading side segmentation model...", flush=True)
+
+    if not os.path.exists(SIDE_MODEL_PATH):
+        raise FileNotFoundError(
+            f"Side segmentation model not found: "
+            f"{SIDE_MODEL_PATH}"
+        )
 
     side_seg_model = load_learner(
-        "models/stage-1.pkl",
+        SIDE_MODEL_PATH,
         cpu=True
     )
 
-    print("Loading rear segmentation model...")
+    print(
+        "Side segmentation model loaded.",
+        flush=True
+    )
+
+    print("Loading rear segmentation model...", flush=True)
+
+    if not os.path.exists(REAR_MODEL_PATH):
+        raise FileNotFoundError(
+            f"Rear segmentation model not found: "
+            f"{REAR_MODEL_PATH}"
+        )
 
     rear_seg_model = load_learner(
-        "models/stage-2.pkl",
+        REAR_MODEL_PATH,
         cpu=True
     )
 
-    print("Segmentation models loaded.")
+    print(
+        "Rear segmentation model loaded.",
+        flush=True
+    )
+
+    print(
+        "Segmentation models loaded successfully.",
+        flush=True
+    )
 
     return side_seg_model, rear_seg_model
 
@@ -97,14 +144,16 @@ def get_segmentation_masks(
         image = ImageOps.exif_transpose(image)
 
         print(
-            f"Running segmentation for {view_type}..."
+            f"Running segmentation for {view_type}...",
+            flush=True
         )
 
         original_w, original_h = image.size
 
         print(
             f"Original image size = "
-            f"{original_w} x {original_h}"
+            f"{original_w} x {original_h}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -122,30 +171,42 @@ def get_segmentation_masks(
             bs=1
         )
 
-        print("Running inference...")
+        print(
+            "Running inference...",
+            flush=True
+        )
 
         preds, _ = model.get_preds(
             dl=dl
         )
 
-        print("Inference completed.")
+        print(
+            "Inference completed.",
+            flush=True
+        )
 
         # ---------------------------------------------------
         # PREDICTION MASK
         # ---------------------------------------------------
 
-        pred_mask = preds[0].argmax(
-            dim=0
-        ).cpu().numpy().astype(np.uint8)
+        pred_mask = (
+            preds[0]
+            .argmax(dim=0)
+            .cpu()
+            .numpy()
+            .astype(np.uint8)
+        )
 
         print(
             f"Prediction mask shape = "
-            f"{pred_mask.shape}"
+            f"{pred_mask.shape}",
+            flush=True
         )
 
         print(
             f"Unique predicted classes = "
-            f"{np.unique(pred_mask)}"
+            f"{np.unique(pred_mask)}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -153,8 +214,8 @@ def get_segmentation_masks(
         # ---------------------------------------------------
 
         if (
-            pred_mask.shape[1] != original_w or
-            pred_mask.shape[0] != original_h
+            pred_mask.shape[1] != original_w
+            or pred_mask.shape[0] != original_h
         ):
 
             pred_mask = cv2.resize(
@@ -164,7 +225,8 @@ def get_segmentation_masks(
             )
 
             print(
-                "Mask resized back to original size."
+                "Mask resized back to original size.",
+                flush=True
             )
 
         # ---------------------------------------------------
@@ -185,7 +247,10 @@ def get_segmentation_masks(
                 None
             )
 
-        print(f"Model vocab = {vocab}")
+        print(
+            f"Model vocab = {vocab}",
+            flush=True
+        )
 
         # ---------------------------------------------------
         # CLASS INDEX RESOLUTION
@@ -195,19 +260,28 @@ def get_segmentation_masks(
 
         if vocab is not None:
 
-            # numpy array case
+            # NumPy array case
 
             if isinstance(vocab, np.ndarray):
 
                 vocab = vocab.tolist()
 
-            # list case
+            # List case
 
             if isinstance(vocab, list):
 
-                cattle_idx = vocab.index(
-                    "Cattle"
-                )
+                if "Cattle" in vocab:
+
+                    cattle_idx = vocab.index(
+                        "Cattle"
+                    )
+
+                else:
+
+                    raise ValueError(
+                        f"'Cattle' class not found "
+                        f"in model vocabulary: {vocab}"
+                    )
 
                 if "Sticker" in vocab:
 
@@ -215,13 +289,22 @@ def get_segmentation_masks(
                         "Sticker"
                     )
 
-            # fastai CategoryMap case
+            # FastAI CategoryMap case
 
             elif hasattr(vocab, "o2i"):
 
-                cattle_idx = vocab.o2i[
-                    "Cattle"
-                ]
+                if "Cattle" in vocab.o2i:
+
+                    cattle_idx = vocab.o2i[
+                        "Cattle"
+                    ]
+
+                else:
+
+                    raise ValueError(
+                        f"'Cattle' class not found "
+                        f"in model vocabulary: {vocab.o2i}"
+                    )
 
                 if "Sticker" in vocab.o2i:
 
@@ -231,7 +314,7 @@ def get_segmentation_masks(
 
             else:
 
-                # fallback
+                # Fallback
 
                 if view_type == "Side":
 
@@ -266,12 +349,14 @@ def get_segmentation_masks(
 
         print(
             f"Cattle class index = "
-            f"{cattle_idx}"
+            f"{cattle_idx}",
+            flush=True
         )
 
         print(
             f"Sticker class index = "
-            f"{sticker_idx}"
+            f"{sticker_idx}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -298,7 +383,8 @@ def get_segmentation_masks(
 
         print(
             f"Cattle mask area = "
-            f"{np.sum(cattle_mask)}"
+            f"{np.sum(cattle_mask)}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -308,8 +394,8 @@ def get_segmentation_masks(
         sticker_mask = None
 
         if (
-            view_type == "Side" and
-            sticker_idx is not None
+            view_type == "Side"
+            and sticker_idx is not None
         ):
 
             sticker_mask = (
@@ -322,12 +408,14 @@ def get_segmentation_masks(
 
             print(
                 f"Sticker mask area = "
-                f"{np.sum(sticker_mask)}"
+                f"{np.sum(sticker_mask)}",
+                flush=True
             )
 
         print(
             f"Segmentation finished for "
-            f"{view_type}"
+            f"{view_type}",
+            flush=True
         )
 
         return sticker_mask, cattle_mask
@@ -336,10 +424,11 @@ def get_segmentation_masks(
 
         print(
             f"Segmentation Error "
-            f"({view_type}): {e}"
+            f"({view_type}): {e}",
+            flush=True
         )
 
-        return None, None
+        raise
 
 
 # ---------------------------------------------------
@@ -353,7 +442,10 @@ def compute_scale_from_sticker(
 
     if sticker_mask is None:
 
-        print("Sticker mask is None")
+        print(
+            "Sticker mask is None",
+            flush=True
+        )
 
         return None
 
@@ -369,7 +461,10 @@ def compute_scale_from_sticker(
 
     if len(contours) == 0:
 
-        print("No sticker contour found")
+        print(
+            "No sticker contour found",
+            flush=True
+        )
 
         return None
 
@@ -383,7 +478,8 @@ def compute_scale_from_sticker(
     sticker_px = max(w, h)
 
     print(
-        f"Sticker pixels = {sticker_px}"
+        f"Sticker pixels = {sticker_px}",
+        flush=True
     )
 
     if sticker_px == 0:
@@ -391,11 +487,13 @@ def compute_scale_from_sticker(
         return None
 
     scale = (
-        sticker_size_in / float(sticker_px)
+        sticker_size_in /
+        float(sticker_px)
     )
 
     print(
-        f"Computed scale = {scale}"
+        f"Computed scale = {scale}",
+        flush=True
     )
 
     return scale
@@ -411,7 +509,8 @@ def euclidean(
 ):
 
     return np.linalg.norm(
-        np.array(p1) - np.array(p2)
+        np.array(p1) -
+        np.array(p2)
     )
 
 
@@ -425,4 +524,3 @@ def dist_in_inches(
         p1,
         p2
     ) * scale
-
