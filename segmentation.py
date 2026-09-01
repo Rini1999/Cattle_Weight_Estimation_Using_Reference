@@ -1,6 +1,26 @@
 import os
 import pathlib
 
+# ---------------------------------------------------
+# CROSS-PLATFORM PATH COMPATIBILITY
+# ---------------------------------------------------
+#
+# The fastai model files contain serialized pathlib
+# objects from a different operating system.
+#
+# Windows  -> convert serialized PosixPath to WindowsPath
+# Linux    -> convert serialized WindowsPath to PosixPath
+#
+# Do NOT replace pathlib.Path itself.
+# ---------------------------------------------------
+
+if os.name == "nt":
+    # Running on Windows
+    pathlib.PosixPath = pathlib.WindowsPath
+else:
+    # Running on Linux / Streamlit Community Cloud
+    pathlib.WindowsPath = pathlib.PosixPath
+
 import numpy as np
 import torch
 import cv2
@@ -14,69 +34,19 @@ from fastai.vision.all import load_learner
 # ---------------------------------------------------
 
 cv2.setNumThreads(0)
+
 torch.set_num_threads(1)
 
 
 # ---------------------------------------------------
-# CROSS-PLATFORM PATH COMPATIBILITY
-# ---------------------------------------------------
-#
-# The fastai .pkl files were created on a different
-# operating system and contain serialized pathlib
-# objects.
-#
-# Windows:
-#     WindowsPath(...)
-#
-# Linux:
-#     PosixPath(...)
-#
-# When the model is loaded on the other OS, Python
-# normally raises:
-#
-#     NotImplementedError:
-#     cannot instantiate 'WindowsPath' on your system
-#
-# or:
-#
-#     cannot instantiate 'PosixPath' on your system
-#
-# We temporarily replace the incompatible class with
-# a compatible concrete path class during unpickling.
+# CROSS-PLATFORM FASTAI MODEL LOADER
 # ---------------------------------------------------
 
 def load_learner_cross_platform(model_path):
 
-    original_windows_path = pathlib.WindowsPath
-    original_posix_path = pathlib.PosixPath
+    print(f"Loading model: {model_path}", flush=True)
 
     try:
-
-        # ---------------------------------------------------
-        # Determine the currently supported concrete path
-        # ---------------------------------------------------
-
-        if os.name == "nt":
-
-            # Running on Windows.
-            #
-            # Serialized PosixPath objects must be allowed
-            # to instantiate as WindowsPath.
-
-            pathlib.PosixPath = pathlib.WindowsPath
-
-        else:
-
-            # Running on Linux / Streamlit Cloud.
-            #
-            # Serialized WindowsPath objects must be allowed
-            # to instantiate as PosixPath.
-
-            pathlib.WindowsPath = pathlib.PosixPath
-
-        print(
-            f"Loading model: {model_path}"
-        )
 
         model = load_learner(
             model_path,
@@ -84,19 +54,30 @@ def load_learner_cross_platform(model_path):
         )
 
         print(
-            f"Successfully loaded: {model_path}"
+            f"Successfully loaded: {model_path}",
+            flush=True
         )
 
         return model
 
-    finally:
+    except Exception as e:
 
-        # ---------------------------------------------------
-        # Restore original pathlib classes
-        # ---------------------------------------------------
+        print(
+            f"Failed to load model: {model_path}",
+            flush=True
+        )
 
-        pathlib.WindowsPath = original_windows_path
-        pathlib.PosixPath = original_posix_path
+        print(
+            f"Error type: {type(e).__name__}",
+            flush=True
+        )
+
+        print(
+            f"Error message: {e}",
+            flush=True
+        )
+
+        raise
 
 
 # ---------------------------------------------------
@@ -106,7 +87,8 @@ def load_learner_cross_platform(model_path):
 def load_segmentation_models():
 
     print(
-        "Loading side segmentation model..."
+        "Loading side segmentation model...",
+        flush=True
     )
 
     side_seg_model = load_learner_cross_platform(
@@ -114,7 +96,8 @@ def load_segmentation_models():
     )
 
     print(
-        "Loading rear segmentation model..."
+        "Loading rear segmentation model...",
+        flush=True
     )
 
     rear_seg_model = load_learner_cross_platform(
@@ -122,13 +105,11 @@ def load_segmentation_models():
     )
 
     print(
-        "Segmentation models loaded."
+        "Segmentation models loaded.",
+        flush=True
     )
 
-    return (
-        side_seg_model,
-        rear_seg_model
-    )
+    return side_seg_model, rear_seg_model
 
 
 # ---------------------------------------------------
@@ -176,19 +157,19 @@ def get_segmentation_masks(
 
     try:
 
-        image = ImageOps.exif_transpose(
-            image
-        )
+        image = ImageOps.exif_transpose(image)
 
         print(
-            f"Running segmentation for {view_type}..."
+            f"Running segmentation for {view_type}...",
+            flush=True
         )
 
         original_w, original_h = image.size
 
         print(
             f"Original image size = "
-            f"{original_w} x {original_h}"
+            f"{original_w} x {original_h}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -207,7 +188,8 @@ def get_segmentation_masks(
         )
 
         print(
-            "Running inference..."
+            "Running inference...",
+            flush=True
         )
 
         preds, _ = model.get_preds(
@@ -215,7 +197,8 @@ def get_segmentation_masks(
         )
 
         print(
-            "Inference completed."
+            "Inference completed.",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -232,12 +215,14 @@ def get_segmentation_masks(
 
         print(
             f"Prediction mask shape = "
-            f"{pred_mask.shape}"
+            f"{pred_mask.shape}",
+            flush=True
         )
 
         print(
             f"Unique predicted classes = "
-            f"{np.unique(pred_mask)}"
+            f"{np.unique(pred_mask)}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -257,7 +242,8 @@ def get_segmentation_masks(
             )
 
             print(
-                "Mask resized back to original size."
+                "Mask resized back to original size.",
+                flush=True
             )
 
         # ---------------------------------------------------
@@ -279,7 +265,8 @@ def get_segmentation_masks(
             )
 
         print(
-            f"Model vocab = {vocab}"
+            f"Model vocab = {vocab}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -291,25 +278,15 @@ def get_segmentation_masks(
 
         if vocab is not None:
 
-            # ------------------------------------------------
-            # NumPy array
-            # ------------------------------------------------
+            # numpy array case
 
-            if isinstance(
-                vocab,
-                np.ndarray
-            ):
+            if isinstance(vocab, np.ndarray):
 
                 vocab = vocab.tolist()
 
-            # ------------------------------------------------
-            # List / tuple
-            # ------------------------------------------------
+            # list / tuple case
 
-            if isinstance(
-                vocab,
-                (list, tuple)
-            ):
+            if isinstance(vocab, (list, tuple)):
 
                 if "Cattle" in vocab:
 
@@ -323,14 +300,9 @@ def get_segmentation_masks(
                         "Sticker"
                     )
 
-            # ------------------------------------------------
-            # fastai CategoryMap
-            # ------------------------------------------------
+            # fastai CategoryMap case
 
-            elif hasattr(
-                vocab,
-                "o2i"
-            ):
+            elif hasattr(vocab, "o2i"):
 
                 if "Cattle" in vocab.o2i:
 
@@ -345,42 +317,40 @@ def get_segmentation_masks(
                     ]
 
         # ---------------------------------------------------
-        # FALLBACK CLASS INDICES
+        # MANUAL FALLBACKS
         # ---------------------------------------------------
 
         if cattle_idx is None:
 
             if view_type == "Side":
 
-                # Side:
-                #
-                # 0 = Sticker
-                # 1 = Cattle
-                # 2 = Background
+                # Sticker, Cattle,
+                # Background, Void
+
+                cattle_idx = 1
 
                 if sticker_idx is None:
 
                     sticker_idx = 0
 
-                cattle_idx = 1
-
             else:
 
-                # Rear:
-                #
-                # 0 = Cattle
-                # 1 = Background
+                # Cattle,
+                # Background,
+                # Void
 
                 cattle_idx = 0
 
         print(
             f"Cattle class index = "
-            f"{cattle_idx}"
+            f"{cattle_idx}",
+            flush=True
         )
 
         print(
             f"Sticker class index = "
-            f"{sticker_idx}"
+            f"{sticker_idx}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -392,7 +362,7 @@ def get_segmentation_masks(
         ).astype(np.uint8)
 
         # ---------------------------------------------------
-        # MORPHOLOGICAL CLEANUP
+        # CLEANUP
         # ---------------------------------------------------
 
         cattle_mask = cv2.morphologyEx(
@@ -404,17 +374,14 @@ def get_segmentation_masks(
             )
         )
 
-        # ---------------------------------------------------
-        # KEEP LARGEST COMPONENT
-        # ---------------------------------------------------
-
         cattle_mask = keep_largest_component(
             cattle_mask
         )
 
         print(
             f"Cattle mask area = "
-            f"{np.sum(cattle_mask)}"
+            f"{np.sum(cattle_mask)}",
+            flush=True
         )
 
         # ---------------------------------------------------
@@ -439,30 +406,27 @@ def get_segmentation_masks(
 
             print(
                 f"Sticker mask area = "
-                f"{np.sum(sticker_mask)}"
+                f"{np.sum(sticker_mask)}",
+                flush=True
             )
 
         print(
             f"Segmentation finished for "
-            f"{view_type}"
+            f"{view_type}",
+            flush=True
         )
 
-        return (
-            sticker_mask,
-            cattle_mask
-        )
+        return sticker_mask, cattle_mask
 
     except Exception as e:
 
         print(
             f"Segmentation Error "
-            f"({view_type}): {e}"
+            f"({view_type}): {e}",
+            flush=True
         )
 
-        return (
-            None,
-            None
-        )
+        return None, None
 
 
 # ---------------------------------------------------
@@ -477,7 +441,8 @@ def compute_scale_from_sticker(
     if sticker_mask is None:
 
         print(
-            "Sticker mask is None"
+            "Sticker mask is None",
+            flush=True
         )
 
         return None
@@ -495,7 +460,8 @@ def compute_scale_from_sticker(
     if len(contours) == 0:
 
         print(
-            "No sticker contour found"
+            "No sticker contour found",
+            flush=True
         )
 
         return None
@@ -505,17 +471,13 @@ def compute_scale_from_sticker(
         key=cv2.contourArea
     )
 
-    x, y, w, h = cv2.boundingRect(
-        cnt
-    )
+    x, y, w, h = cv2.boundingRect(cnt)
 
-    sticker_px = max(
-        w,
-        h
-    )
+    sticker_px = max(w, h)
 
     print(
-        f"Sticker pixels = {sticker_px}"
+        f"Sticker pixels = {sticker_px}",
+        flush=True
     )
 
     if sticker_px == 0:
@@ -523,13 +485,13 @@ def compute_scale_from_sticker(
         return None
 
     scale = (
-        sticker_size_in
-        /
+        sticker_size_in /
         float(sticker_px)
     )
 
     print(
-        f"Computed scale = {scale}"
+        f"Computed scale = {scale}",
+        flush=True
     )
 
     return scale
@@ -545,8 +507,7 @@ def euclidean(
 ):
 
     return np.linalg.norm(
-        np.array(p1)
-        -
+        np.array(p1) -
         np.array(p2)
     )
 
