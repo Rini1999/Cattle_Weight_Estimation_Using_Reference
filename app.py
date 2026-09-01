@@ -30,7 +30,7 @@ def load_all_models():
     print("STEP 2: Loading segmentation models...", flush=True)
     side_seg_model, rear_seg_model = load_segmentation_models()
 
-    print("STEP 3: Segmentation models returned to app.py", flush=True)
+    print("STEP 3: Segmentation models loaded.", flush=True)
 
     print("STEP 4: Loading keypoint models...", flush=True)
     side_kp_model, rear_kp_model = load_keypoint_models()
@@ -44,8 +44,6 @@ def load_all_models():
 
     print("STEP 7: Regression model loaded.", flush=True)
 
-    print("STEP 8: All models loaded successfully.", flush=True)
-
     return (
         side_seg_model,
         rear_seg_model,
@@ -54,9 +52,6 @@ def load_all_models():
         reg_model
     )
 
-# ---------------------------------------------------
-# LOAD ALL MODELS
-# ---------------------------------------------------
 
 (
     side_seg_model,
@@ -69,8 +64,6 @@ def load_all_models():
 # ---------------------------------------------------
 # UI
 # ---------------------------------------------------
-
-print("STEP 9: Rendering Streamlit UI", flush=True)
 
 st.title("Cattle Weight Estimator")
 
@@ -101,14 +94,29 @@ if side_file and rear_file:
     side_img = Image.open(side_file).convert("RGB")
     rear_img = Image.open(rear_file).convert("RGB")
 
-    col1.image(side_img, caption="Side View", use_container_width=True)
-    col2.image(rear_img, caption="Rear View", use_container_width=True)
+    col1.image(
+        side_img,
+        caption="Side View",
+        use_container_width=True
+    )
+
+    col2.image(
+        rear_img,
+        caption="Rear View",
+        use_container_width=True
+    )
 
     if st.button("Predict Weight"):
 
         try:
 
+            # --------------------------------------------
+            # SIDE FEATURES
+            # --------------------------------------------
+
             with st.spinner("Extracting side-view features..."):
+
+                print("STEP 8: Extracting SIDE features...", flush=True)
 
                 side_feats = extract_features(
                     side_img,
@@ -117,7 +125,22 @@ if side_file and rear_file:
                     side_kp_model
                 )
 
+                print("STEP 9: SIDE extraction completed.", flush=True)
+
+            if side_feats is None:
+
+                st.error("Side-view feature extraction returned None.")
+                st.stop()
+
+            st.success("Side-view features extracted successfully.")
+
+            # --------------------------------------------
+            # REAR FEATURES
+            # --------------------------------------------
+
             with st.spinner("Extracting rear-view features..."):
+
+                print("STEP 10: Extracting REAR features...", flush=True)
 
                 rear_feats = extract_features(
                     rear_img,
@@ -126,14 +149,18 @@ if side_file and rear_file:
                     rear_kp_model
                 )
 
-            if side_feats is None or rear_feats is None:
+                print("STEP 11: REAR extraction completed.", flush=True)
 
-                st.error("Feature extraction failed.")
+            if rear_feats is None:
+
+                st.error("Rear-view feature extraction returned None.")
                 st.stop()
 
-            # ------------------------------------------------
+            st.success("Rear-view features extracted successfully.")
+
+            # --------------------------------------------
             # DERIVED FEATURES
-            # ------------------------------------------------
+            # --------------------------------------------
 
             volume_proxy_1 = (
                 side_feats["side_mask_area"] *
@@ -185,9 +212,9 @@ if side_file and rear_file:
                 (rear_feats["rear_eccentricity"] + 1e-6)
             )
 
-            # ------------------------------------------------
+            # --------------------------------------------
             # FEATURE DICTIONARY
-            # ------------------------------------------------
+            # --------------------------------------------
 
             feature_dict = {
 
@@ -202,51 +229,73 @@ if side_file and rear_file:
 
                 "side_major_axis_length":
                     side_feats["side_major_axis_length"],
+
                 "side_bbox_width":
                     side_feats["side_bbox_width"],
+
                 "side_aspect_ratio":
                     side_feats["side_aspect_ratio"],
+
                 "side_eccentricity":
                     side_feats["side_eccentricity"],
+
                 "side_mask_area":
                     side_feats["side_mask_area"],
+
                 "side_convex_hull_area":
                     side_feats["side_convex_hull_area"],
+
                 "side_minor_axis_length":
                     side_feats["side_minor_axis_length"],
+
                 "side_perimeter":
                     side_feats["side_perimeter"],
+
                 "side_bbox_height":
                     side_feats["side_bbox_height"],
+
                 "side_solidity":
                     side_feats["side_solidity"],
+
                 "side_circularity":
                     side_feats["side_circularity"],
+
                 "side_extent":
                     side_feats["side_extent"],
 
                 "rear_major_axis_length":
                     rear_feats["rear_major_axis_length"],
+
                 "rear_bbox_width":
                     rear_feats["rear_bbox_width"],
+
                 "rear_aspect_ratio":
                     rear_feats["rear_aspect_ratio"],
+
                 "rear_eccentricity":
                     rear_feats["rear_eccentricity"],
+
                 "rear_mask_area":
                     rear_feats["rear_mask_area"],
+
                 "rear_convex_hull_area":
                     rear_feats["rear_convex_hull_area"],
+
                 "rear_minor_axis_length":
                     rear_feats["rear_minor_axis_length"],
+
                 "rear_perimeter":
                     rear_feats["rear_perimeter"],
+
                 "rear_bbox_height":
                     rear_feats["rear_bbox_height"],
+
                 "rear_solidity":
                     rear_feats["rear_solidity"],
+
                 "rear_circularity":
                     rear_feats["rear_circularity"],
+
                 "rear_extent":
                     rear_feats["rear_extent"],
 
@@ -264,27 +313,23 @@ if side_file and rear_file:
                 "eccentricity_balance": eccentricity_balance,
             }
 
-            # ------------------------------------------------
-            # DATAFRAME
-            # ------------------------------------------------
+            # --------------------------------------------
+            # PREDICTION
+            # --------------------------------------------
 
             X = pd.DataFrame([feature_dict])
 
-            print("STEP 10: Features extracted successfully.", flush=True)
-
-            # ------------------------------------------------
-            # PREDICTION
-            # ------------------------------------------------
+            print("STEP 12: Running CatBoost prediction...", flush=True)
 
             pred = model.predict(X)[0]
 
-            print("STEP 11: Prediction completed.", flush=True)
+            print("STEP 13: Prediction completed.", flush=True)
 
             st.success(f"Estimated Weight: {pred:.2f} kg")
 
         except Exception as e:
 
-            print(f"Prediction Error: {e}", flush=True)
+            print(f"ERROR: {e}", flush=True)
 
-            st.error(str(e))
+            st.error("An error occurred during prediction.")
             st.exception(e)
