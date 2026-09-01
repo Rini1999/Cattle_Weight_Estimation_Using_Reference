@@ -15,6 +15,14 @@ st.write("torch path:", torch.__file__)
 st.write("torchvision:", torchvision.__version__)
 st.write("torchvision path:", torchvision.__file__)
 
+import fastai.vision.core
+import fasttransform
+import fasttransform.transform
+
+st.write("fastai vision core path:", fastai.vision.core.__file__)
+st.write("fasttransform path:", fasttransform.__file__)
+st.write("fasttransform transform path:", fasttransform.transform.__file__)
+
 import streamlit as st
 import numpy as np
 import pandas as pd
