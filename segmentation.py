@@ -19,7 +19,7 @@ from fastai.vision.all import load_learner
 # model deserialization.
 
 if os.name != "nt":
-    pathlib.WindowsPath = pathlib.PosixPath
+    pathlib.WindowsPath._flavour = pathlib.PosixPath._flavour
 
 
 # ---------------------------------------------------
@@ -54,14 +54,8 @@ def load_segmentation_models():
 
     print("Loading side segmentation model...", flush=True)
 
-    if not os.path.exists(SIDE_MODEL_PATH):
-        raise FileNotFoundError(
-            f"Side segmentation model not found: "
-            f"{SIDE_MODEL_PATH}"
-        )
-
     side_seg_model = load_learner(
-        SIDE_MODEL_PATH,
+        "models/stage-1.pkl",
         cpu=True
     )
 
@@ -70,16 +64,13 @@ def load_segmentation_models():
         flush=True
     )
 
-    print("Loading rear segmentation model...", flush=True)
-
-    if not os.path.exists(REAR_MODEL_PATH):
-        raise FileNotFoundError(
-            f"Rear segmentation model not found: "
-            f"{REAR_MODEL_PATH}"
-        )
+    print(
+        "Loading rear segmentation model...",
+        flush=True
+    )
 
     rear_seg_model = load_learner(
-        REAR_MODEL_PATH,
+        "models/stage-2.pkl",
         cpu=True
     )
 
