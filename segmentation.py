@@ -1,4 +1,10 @@
+import os
 import sys
+import pathlib
+
+# ---------------------------------------------------
+# ENVIRONMENT DEBUG
+# ---------------------------------------------------
 import fastai
 import fastcore
 import torch
@@ -12,126 +18,60 @@ print(f"fastcore location: {fastcore.__file__}", flush=True)
 print(f"torch version: {torch.__version__}", flush=True)
 print(f"torch location: {torch.__file__}", flush=True)
 print("========================================", flush=True)
-import os
-import pathlib
 
 # ---------------------------------------------------
 # CROSS-PLATFORM PATH COMPATIBILITY
 # ---------------------------------------------------
-#
-# The fastai model files contain serialized pathlib
-# objects from a different operating system.
-#
-# Windows -> convert serialized PosixPath to WindowsPath
-# Linux   -> convert serialized WindowsPath to PosixPath
-#
-# Do NOT replace pathlib.Path itself.
-# ---------------------------------------------------
 
 if os.name == "nt":
-    # Running on Windows
     pathlib.PosixPath = pathlib.WindowsPath
 else:
-    # Running on Linux / Streamlit Community Cloud
     pathlib.WindowsPath = pathlib.PosixPath
 
-
 import numpy as np
-import torch
 import cv2
 
 from PIL import ImageOps
 from fastai.vision.all import load_learner
 
-
 # ---------------------------------------------------
-# CPU / PERFORMANCE SETTINGS
+# CPU SETTINGS
 # ---------------------------------------------------
 
 cv2.setNumThreads(0)
-
 torch.set_num_threads(1)
 
+DEVICE = torch.device("cpu")
 
 # ---------------------------------------------------
-# CROSS-PLATFORM FASTAI MODEL LOADER
+# LOAD FASTAI MODELS
 # ---------------------------------------------------
 
 def load_learner_cross_platform(model_path):
 
-    print(
-        f"Loading model: {model_path}",
-        flush=True
-    )
+    print(f"Loading model: {model_path}", flush=True)
 
-    try:
+    model = load_learner(model_path, cpu=True)
 
-        model = load_learner(
-            model_path,
-            cpu=True
-        )
+    model.model.to(DEVICE)
+    model.model.eval()
 
-        print(
-            f"Successfully loaded: {model_path}",
-            flush=True
-        )
+    print(f"Successfully loaded: {model_path}", flush=True)
 
-        return model
+    return model
 
-    except Exception as e:
-
-        print(
-            f"Failed to load model: {model_path}",
-            flush=True
-        )
-
-        print(
-            f"Error type: {type(e).__name__}",
-            flush=True
-        )
-
-        print(
-            f"Error message: {e}",
-            flush=True
-        )
-
-        raise
-
-
-# ---------------------------------------------------
-# LOAD SEGMENTATION MODELS
-# ---------------------------------------------------
 
 def load_segmentation_models():
 
-    print(
-        "Loading side segmentation model...",
-        flush=True
-    )
+    print("Loading side segmentation model...", flush=True)
+    side_seg_model = load_learner_cross_platform("models/stage-1.pkl")
 
-    side_seg_model = load_learner_cross_platform(
-        "models/stage-1.pkl"
-    )
+    print("Loading rear segmentation model...", flush=True)
+    rear_seg_model = load_learner_cross_platform("models/stage-2.pkl")
 
-    print(
-        "Loading rear segmentation model...",
-        flush=True
-    )
+    print("Segmentation models loaded.", flush=True)
 
-    rear_seg_model = load_learner_cross_platform(
-        "models/stage-2.pkl"
-    )
-
-    print(
-        "Segmentation models loaded.",
-        flush=True
-    )
-
-    return (
-        side_seg_model,
-        rear_seg_model
-    )
-
+    return side_seg_model, rear_seg_model
 
 # ---------------------------------------------------
 # KEEP LARGEST COMPONENT
@@ -148,13 +88,9 @@ def keep_largest_component(mask):
     )
 
     if len(contours) == 0:
-
         return mask
 
-    largest = max(
-        contours,
-        key=cv2.contourArea
-    )
+    largest = max(contours, key=cv2.contourArea)
 
     clean = np.zeros_like(mask)
 
@@ -168,335 +104,107 @@ def keep_largest_component(mask):
 
     return clean
 
-
 # ---------------------------------------------------
-# MAIN SEGMENTATION FUNCTION
+# SEGMENTATION
 # ---------------------------------------------------
 
-def get_segmentation_masks(
-    model,
-    image,
-    view_type
-):
+def get_segmentation_masks(model, image, view_type):
 
     try:
 
-        # ---------------------------------------------------
-        # FIX IMAGE ORIENTATION
-        # ---------------------------------------------------
+        image = ImageOps.exif_transpose(image)
 
-        image = ImageOps.exif_transpose(
-            image
-        )
-
-        print(
-            f"Running segmentation for {view_type}...",
-            flush=True
-        )
-
-        # ---------------------------------------------------
-        # ORIGINAL IMAGE SIZE
-        # ---------------------------------------------------
+        print(f"Running segmentation for {view_type}...", flush=True)
 
         original_w, original_h = image.size
 
-        print(
-            f"Original image size = "
-            f"{original_w} x {original_h}",
-            flush=True
-        )
+        print(f"Original image size = {original_w} x {original_h}", flush=True)
 
         # ---------------------------------------------------
-        # DO NOT MANUALLY RESIZE
-        # ---------------------------------------------------
-        #
-        # FastAI's saved learner contains the transforms
-        # that were used during training.
-        #
-        # Therefore, pass the original PIL image to
-        # test_dl().
+        # CREATE TEST DATALOADER
         # ---------------------------------------------------
 
-        inference_image = image
-
-        # ---------------------------------------------------
-        # FASTAI TEST DATALOADER
-        # ---------------------------------------------------
-        #
-        # IMPORTANT:
-        # num_workers=0 prevents FastAI/PyTorch from
-        # creating worker processes on Streamlit Community
-        # Cloud.
-        #
-        # This fixes:
-        #
-        # Caught TypeError in DataLoader worker process 0
-        #
-        # and:
-        #
-        # TypeError:
-        # 'torch._C._TensorMeta' object does not support
-        # the asynchronous context manager protocol
-        # ---------------------------------------------------
-
-        print(
-            "Creating FastAI test DataLoader "
-            "with num_workers=0...",
-            flush=True
-        )
+        print("Creating FastAI test DataLoader...", flush=True)
 
         dl = model.dls.test_dl(
-            [inference_image],
+            [image],
             bs=1,
             num_workers=0
         )
 
-        print(
-            "Test DataLoader created successfully.",
-            flush=True
-        )
+        print("Test DataLoader created successfully.", flush=True)
 
         # ---------------------------------------------------
-        # RUN INFERENCE
+        # GET ONE BATCH
         # ---------------------------------------------------
 
-        print(
-            "Running inference...",
-            flush=True
-        )
+        batch = dl.one_batch()
 
-        preds, _ = model.get_preds(
-            dl=dl
-        )
+        x = batch[0].to(DEVICE)
 
-        print(
-            "Inference completed.",
-            flush=True
-        )
+        print(f"Batch tensor shape = {x.shape}", flush=True)
 
         # ---------------------------------------------------
-        # CHECK PREDICTION
+        # DIRECT FORWARD PASS
         # ---------------------------------------------------
 
-        if preds is None:
+        print("Running model forward pass...", flush=True)
 
-            print(
-                "Prediction output is None.",
-                flush=True
-            )
+        with torch.no_grad():
+            output = model.model(x)
 
-            return None, None
-
-        if len(preds) == 0:
-
-            print(
-                "Prediction output is empty.",
-                flush=True
-            )
-
-            return None, None
-
-        print(
-            f"Prediction tensor shape = "
-            f"{preds.shape}",
-            flush=True
-        )
+        print("Forward pass completed.", flush=True)
+        print(f"Output shape = {output.shape}", flush=True)
 
         # ---------------------------------------------------
-        # CONVERT PREDICTION TO CLASS MASK
+        # CLASS PREDICTION
         # ---------------------------------------------------
 
         pred_mask = (
-            preds[0]
+            output[0]
             .argmax(dim=0)
             .cpu()
             .numpy()
             .astype(np.uint8)
         )
 
-        print(
-            f"Prediction mask shape = "
-            f"{pred_mask.shape}",
-            flush=True
-        )
-
-        print(
-            f"Unique predicted classes = "
-            f"{np.unique(pred_mask)}",
-            flush=True
-        )
+        print(f"Prediction mask shape = {pred_mask.shape}", flush=True)
+        print(f"Unique predicted classes = {np.unique(pred_mask)}", flush=True)
 
         # ---------------------------------------------------
-        # RESIZE MASK TO ORIGINAL IMAGE SIZE
+        # RESIZE BACK TO ORIGINAL IMAGE SIZE
         # ---------------------------------------------------
 
-        if (
-            pred_mask.shape[1] != original_w
-            or
-            pred_mask.shape[0] != original_h
-        ):
+        if pred_mask.shape != (original_h, original_w):
 
             pred_mask = cv2.resize(
                 pred_mask,
-                (
-                    original_w,
-                    original_h
-                ),
+                (original_w, original_h),
                 interpolation=cv2.INTER_NEAREST
             )
 
-            print(
-                "Mask resized back to original size.",
-                flush=True
-            )
+            print("Mask resized to original image size.", flush=True)
 
         # ---------------------------------------------------
-        # GET VOCAB
+        # CLASS INDICES
         # ---------------------------------------------------
 
-        vocab = getattr(
-            model.dls,
-            "vocab",
-            None
-        )
+        if view_type == "Side":
+            sticker_idx = 0
+            cattle_idx = 1
+        else:
+            sticker_idx = None
+            cattle_idx = 0
 
-        if vocab is None:
-
-            vocab = getattr(
-                model.dls.train_ds,
-                "vocab",
-                None
-            )
-
-        print(
-            f"Model vocab = {vocab}",
-            flush=True
-        )
+        print(f"Cattle class index = {cattle_idx}", flush=True)
 
         # ---------------------------------------------------
-        # CLASS INDEX VARIABLES
+        # CATTLE MASK
         # ---------------------------------------------------
 
-        sticker_idx = None
-        cattle_idx = None
+        cattle_mask = (pred_mask == cattle_idx).astype(np.uint8)
 
-        # ---------------------------------------------------
-        # RESOLVE CLASS INDICES
-        # ---------------------------------------------------
-
-        if vocab is not None:
-
-            # -----------------------------------------------
-            # NumPy array
-            # -----------------------------------------------
-
-            if isinstance(
-                vocab,
-                np.ndarray
-            ):
-
-                vocab = vocab.tolist()
-
-            # -----------------------------------------------
-            # List / tuple
-            # -----------------------------------------------
-
-            if isinstance(
-                vocab,
-                (list, tuple)
-            ):
-
-                if "Cattle" in vocab:
-
-                    cattle_idx = vocab.index(
-                        "Cattle"
-                    )
-
-                if "Sticker" in vocab:
-
-                    sticker_idx = vocab.index(
-                        "Sticker"
-                    )
-
-            # -----------------------------------------------
-            # FastAI CategoryMap
-            # -----------------------------------------------
-
-            elif hasattr(
-                vocab,
-                "o2i"
-            ):
-
-                if "Cattle" in vocab.o2i:
-
-                    cattle_idx = vocab.o2i[
-                        "Cattle"
-                    ]
-
-                if "Sticker" in vocab.o2i:
-
-                    sticker_idx = vocab.o2i[
-                        "Sticker"
-                    ]
-
-        # ---------------------------------------------------
-        # MANUAL FALLBACK CLASS INDICES
-        # ---------------------------------------------------
-        #
-        # Side model:
-        #   0 = Sticker
-        #   1 = Cattle
-        #   2 = Background
-        #   3 = Void
-        #
-        # Rear model:
-        #   0 = Cattle
-        #   1 = Background
-        #   2 = Void
-        # ---------------------------------------------------
-
-        if cattle_idx is None:
-
-            if view_type == "Side":
-
-                cattle_idx = 1
-
-                if sticker_idx is None:
-
-                    sticker_idx = 0
-
-            else:
-
-                cattle_idx = 0
-
-        print(
-            f"Cattle class index = "
-            f"{cattle_idx}",
-            flush=True
-        )
-
-        print(
-            f"Sticker class index = "
-            f"{sticker_idx}",
-            flush=True
-        )
-
-        # ---------------------------------------------------
-        # CREATE CATTLE MASK
-        # ---------------------------------------------------
-
-        cattle_mask = (
-            pred_mask == cattle_idx
-        ).astype(np.uint8)
-
-        # ---------------------------------------------------
-        # MORPHOLOGICAL CLEANUP
-        # ---------------------------------------------------
-
-        kernel = np.ones(
-            (3, 3),
-            np.uint8
-        )
+        kernel = np.ones((3, 3), np.uint8)
 
         cattle_mask = cv2.morphologyEx(
             cattle_mask,
@@ -504,129 +212,59 @@ def get_segmentation_masks(
             kernel
         )
 
-        # ---------------------------------------------------
-        # KEEP LARGEST CATTLE COMPONENT
-        # ---------------------------------------------------
+        cattle_mask = keep_largest_component(cattle_mask)
 
-        cattle_mask = keep_largest_component(
-            cattle_mask
-        )
+        cattle_area = int(cattle_mask.sum())
 
-        cattle_area = int(
-            np.sum(cattle_mask)
-        )
-
-        print(
-            f"Cattle mask area = "
-            f"{cattle_area}",
-            flush=True
-        )
-
-        # ---------------------------------------------------
-        # VALIDATE CATTLE MASK
-        # ---------------------------------------------------
+        print(f"Cattle mask area = {cattle_area}", flush=True)
 
         if cattle_area == 0:
-
-            print(
-                "WARNING: Cattle mask is empty.",
-                flush=True
-            )
-
+            print("ERROR: Empty cattle mask.", flush=True)
             return None, None
 
         # ---------------------------------------------------
-        # CREATE STICKER MASK
+        # STICKER MASK (SIDE ONLY)
         # ---------------------------------------------------
 
         sticker_mask = None
 
-        if (
-            view_type == "Side"
-            and
-            sticker_idx is not None
-        ):
+        if view_type == "Side":
 
-            sticker_mask = (
-                pred_mask == sticker_idx
-            ).astype(np.uint8)
+            sticker_mask = (pred_mask == sticker_idx).astype(np.uint8)
 
-            sticker_mask = keep_largest_component(
-                sticker_mask
-            )
+            sticker_mask = keep_largest_component(sticker_mask)
 
-            sticker_area = int(
-                np.sum(sticker_mask)
-            )
+            sticker_area = int(sticker_mask.sum())
 
-            print(
-                f"Sticker mask area = "
-                f"{sticker_area}",
-                flush=True
-            )
+            print(f"Sticker mask area = {sticker_area}", flush=True)
 
-            if sticker_area == 0:
+        print(f"Segmentation finished for {view_type}", flush=True)
 
-                print(
-                    "WARNING: Sticker mask is empty.",
-                    flush=True
-                )
-
-        # ---------------------------------------------------
-        # FINISHED
-        # ---------------------------------------------------
-
-        print(
-            f"Segmentation finished for "
-            f"{view_type}",
-            flush=True
-        )
-
-        return (
-            sticker_mask,
-            cattle_mask
-        )
+        return sticker_mask, cattle_mask
 
     except Exception as e:
 
         print(
-            f"Segmentation Error "
-            f"({view_type}): "
-            f"{type(e).__name__}: {e}",
+            f"Segmentation Error ({view_type}): {type(e).__name__}: {e}",
             flush=True
         )
 
         import traceback
-
         traceback.print_exc()
 
-        return (
-            None,
-            None
-        )
-
+        return None, None
 
 # ---------------------------------------------------
 # SCALE ESTIMATION
 # ---------------------------------------------------
 
-def compute_scale_from_sticker(
-    sticker_mask,
-    sticker_size_in=4.0
-):
+def compute_scale_from_sticker(sticker_mask, sticker_size_in=4.0):
 
     if sticker_mask is None:
-
-        print(
-            "Sticker mask is None",
-            flush=True
-        )
-
+        print("Sticker mask is None", flush=True)
         return None
 
-    sticker_mask = sticker_mask.astype(
-        np.uint8
-    )
+    sticker_mask = sticker_mask.astype(np.uint8)
 
     contours, _ = cv2.findContours(
         sticker_mask,
@@ -635,93 +273,34 @@ def compute_scale_from_sticker(
     )
 
     if len(contours) == 0:
-
-        print(
-            "No sticker contour found",
-            flush=True
-        )
-
+        print("No sticker contour found", flush=True)
         return None
 
-    # ---------------------------------------------------
-    # LARGEST STICKER COMPONENT
-    # ---------------------------------------------------
+    cnt = max(contours, key=cv2.contourArea)
 
-    cnt = max(
-        contours,
-        key=cv2.contourArea
-    )
+    x, y, w, h = cv2.boundingRect(cnt)
 
-    x, y, w, h = cv2.boundingRect(
-        cnt
-    )
+    sticker_px = max(w, h)
 
-    sticker_px = max(
-        w,
-        h
-    )
-
-    print(
-        f"Sticker bounding box = "
-        f"{w} x {h}",
-        flush=True
-    )
-
-    print(
-        f"Sticker pixels = "
-        f"{sticker_px}",
-        flush=True
-    )
+    print(f"Sticker bounding box = {w} x {h}", flush=True)
+    print(f"Sticker pixels = {sticker_px}", flush=True)
 
     if sticker_px <= 0:
-
-        print(
-            "Sticker pixel size is zero.",
-            flush=True
-        )
-
         return None
 
-    # ---------------------------------------------------
-    # PIXELS -> INCHES
-    # ---------------------------------------------------
+    scale = sticker_size_in / float(sticker_px)
 
-    scale = (
-        sticker_size_in /
-        float(sticker_px)
-    )
-
-    print(
-        f"Computed scale = "
-        f"{scale}",
-        flush=True
-    )
+    print(f"Computed scale = {scale}", flush=True)
 
     return scale
-
 
 # ---------------------------------------------------
 # DISTANCE UTILITIES
 # ---------------------------------------------------
 
-def euclidean(
-    p1,
-    p2
-):
-
-    return np.linalg.norm(
-        np.array(p1) -
-        np.array(p2)
-    )
+def euclidean(p1, p2):
+    return np.linalg.norm(np.array(p1) - np.array(p2))
 
 
-def dist_in_inches(
-    p1,
-    p2,
-    scale
-):
-
-    return euclidean(
-        p1,
-        p2
-    ) * scale
+def dist_in_inches(p1, p2, scale):
+    return euclidean(p1, p2) * scale
