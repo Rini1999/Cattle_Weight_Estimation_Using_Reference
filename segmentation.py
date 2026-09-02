@@ -1,3 +1,4 @@
+
 import os
 import sys
 import pathlib
@@ -20,9 +21,8 @@ print(f"torch location: {torch.__file__}", flush=True)
 print("========================================", flush=True)
 
 # ---------------------------------------------------
-# CROSS-PLATFORM PATH COMPATIBILITY
+# CROSS-PLATFORM PATH FIX
 # ---------------------------------------------------
-
 if os.name == "nt":
     pathlib.PosixPath = pathlib.WindowsPath
 else:
@@ -30,53 +30,51 @@ else:
 
 import numpy as np
 import cv2
-
 from PIL import ImageOps
+
 from fastai.vision.all import load_learner
+from fastai.vision.core import PILImage
 
 # ---------------------------------------------------
 # CPU SETTINGS
 # ---------------------------------------------------
-
+DEVICE = torch.device("cpu")
 cv2.setNumThreads(0)
 torch.set_num_threads(1)
 
-DEVICE = torch.device("cpu")
-
 # ---------------------------------------------------
-# LOAD FASTAI MODELS
+# MODEL LOADER
 # ---------------------------------------------------
-
 def load_learner_cross_platform(model_path):
 
     print(f"Loading model: {model_path}", flush=True)
 
-    model = load_learner(model_path, cpu=True)
+    learner = load_learner(model_path, cpu=True)
 
-    model.model.to(DEVICE)
-    model.model.eval()
+    learner.model.to(DEVICE)
+    learner.model.eval()
 
     print(f"Successfully loaded: {model_path}", flush=True)
 
-    return model
+    return learner
 
 
 def load_segmentation_models():
 
     print("Loading side segmentation model...", flush=True)
-    side_seg_model = load_learner_cross_platform("models/stage-1.pkl")
+    side_model = load_learner_cross_platform("models/stage-1.pkl")
 
     print("Loading rear segmentation model...", flush=True)
-    rear_seg_model = load_learner_cross_platform("models/stage-2.pkl")
+    rear_model = load_learner_cross_platform("models/stage-2.pkl")
 
     print("Segmentation models loaded.", flush=True)
 
-    return side_seg_model, rear_seg_model
+    return side_model, rear_model
+
 
 # ---------------------------------------------------
 # KEEP LARGEST COMPONENT
 # ---------------------------------------------------
-
 def keep_largest_component(mask):
 
     mask = mask.astype(np.uint8)
@@ -94,20 +92,14 @@ def keep_largest_component(mask):
 
     clean = np.zeros_like(mask)
 
-    cv2.drawContours(
-        clean,
-        [largest],
-        -1,
-        1,
-        thickness=-1
-    )
+    cv2.drawContours(clean, [largest], -1, 1, thickness=-1)
 
     return clean
+
 
 # ---------------------------------------------------
 # SEGMENTATION
 # ---------------------------------------------------
-
 def get_segmentation_masks(model, image, view_type):
 
     try:
@@ -118,48 +110,40 @@ def get_segmentation_masks(model, image, view_type):
 
         original_w, original_h = image.size
 
-        print(f"Original image size = {original_w} x {original_h}", flush=True)
-
-        # ---------------------------------------------------
-        # CREATE TEST DATALOADER
-        # ---------------------------------------------------
-
-        print("Creating FastAI test DataLoader...", flush=True)
-
-        dl = model.dls.test_dl(
-            [image],
-            bs=1,
-            num_workers=0
+        print(
+            f"Original image size = {original_w} x {original_h}",
+            flush=True
         )
 
-        print("Test DataLoader created successfully.", flush=True)
+        # ---------------------------------------------------
+        # CREATE FASTAI IMAGE (NO DATALOADER)
+        # ---------------------------------------------------
+        print("Preparing FastAI image...", flush=True)
+
+        img = PILImage.create(image)
+
+        # Apply the saved validation transforms directly.
+        x = model.dls.valid.after_item(img)
+
+        # Convert TensorImage -> Tensor and add batch dimension.
+        x = x.unsqueeze(0).to(DEVICE)
+
+        print(f"Input tensor shape = {x.shape}", flush=True)
 
         # ---------------------------------------------------
-        # GET ONE BATCH
+        # FORWARD PASS
         # ---------------------------------------------------
-
-        batch = dl.one_batch()
-
-        x = batch[0].to(DEVICE)
-
-        print(f"Batch tensor shape = {x.shape}", flush=True)
-
-        # ---------------------------------------------------
-        # DIRECT FORWARD PASS
-        # ---------------------------------------------------
-
         print("Running model forward pass...", flush=True)
 
         with torch.no_grad():
             output = model.model(x)
 
         print("Forward pass completed.", flush=True)
-        print(f"Output shape = {output.shape}", flush=True)
+        print(f"Output tensor shape = {output.shape}", flush=True)
 
         # ---------------------------------------------------
-        # CLASS PREDICTION
+        # PREDICTION MASK
         # ---------------------------------------------------
-
         pred_mask = (
             output[0]
             .argmax(dim=0)
@@ -168,13 +152,19 @@ def get_segmentation_masks(model, image, view_type):
             .astype(np.uint8)
         )
 
-        print(f"Prediction mask shape = {pred_mask.shape}", flush=True)
-        print(f"Unique predicted classes = {np.unique(pred_mask)}", flush=True)
+        print(
+            f"Prediction mask shape = {pred_mask.shape}",
+            flush=True
+        )
+
+        print(
+            f"Unique classes = {np.unique(pred_mask)}",
+            flush=True
+        )
 
         # ---------------------------------------------------
-        # RESIZE BACK TO ORIGINAL IMAGE SIZE
+        # RESIZE TO ORIGINAL IMAGE
         # ---------------------------------------------------
-
         if pred_mask.shape != (original_h, original_w):
 
             pred_mask = cv2.resize(
@@ -183,12 +173,14 @@ def get_segmentation_masks(model, image, view_type):
                 interpolation=cv2.INTER_NEAREST
             )
 
-            print("Mask resized to original image size.", flush=True)
+            print(
+                "Mask resized to original image size.",
+                flush=True
+            )
 
         # ---------------------------------------------------
         # CLASS INDICES
         # ---------------------------------------------------
-
         if view_type == "Side":
             sticker_idx = 0
             cattle_idx = 1
@@ -196,20 +188,15 @@ def get_segmentation_masks(model, image, view_type):
             sticker_idx = None
             cattle_idx = 0
 
-        print(f"Cattle class index = {cattle_idx}", flush=True)
-
         # ---------------------------------------------------
         # CATTLE MASK
         # ---------------------------------------------------
-
         cattle_mask = (pred_mask == cattle_idx).astype(np.uint8)
-
-        kernel = np.ones((3, 3), np.uint8)
 
         cattle_mask = cv2.morphologyEx(
             cattle_mask,
             cv2.MORPH_OPEN,
-            kernel
+            np.ones((3, 3), np.uint8)
         )
 
         cattle_mask = keep_largest_component(cattle_mask)
@@ -223,9 +210,8 @@ def get_segmentation_masks(model, image, view_type):
             return None, None
 
         # ---------------------------------------------------
-        # STICKER MASK (SIDE ONLY)
+        # STICKER MASK
         # ---------------------------------------------------
-
         sticker_mask = None
 
         if view_type == "Side":
@@ -234,9 +220,10 @@ def get_segmentation_masks(model, image, view_type):
 
             sticker_mask = keep_largest_component(sticker_mask)
 
-            sticker_area = int(sticker_mask.sum())
-
-            print(f"Sticker mask area = {sticker_area}", flush=True)
+            print(
+                f"Sticker mask area = {int(sticker_mask.sum())}",
+                flush=True
+            )
 
         print(f"Segmentation finished for {view_type}", flush=True)
 
@@ -254,11 +241,14 @@ def get_segmentation_masks(model, image, view_type):
 
         return None, None
 
+
 # ---------------------------------------------------
 # SCALE ESTIMATION
 # ---------------------------------------------------
-
-def compute_scale_from_sticker(sticker_mask, sticker_size_in=4.0):
+def compute_scale_from_sticker(
+    sticker_mask,
+    sticker_size_in=4.0
+):
 
     if sticker_mask is None:
         print("Sticker mask is None", flush=True)
@@ -278,14 +268,13 @@ def compute_scale_from_sticker(sticker_mask, sticker_size_in=4.0):
 
     cnt = max(contours, key=cv2.contourArea)
 
-    x, y, w, h = cv2.boundingRect(cnt)
+    _, _, w, h = cv2.boundingRect(cnt)
 
     sticker_px = max(w, h)
 
-    print(f"Sticker bounding box = {w} x {h}", flush=True)
     print(f"Sticker pixels = {sticker_px}", flush=True)
 
-    if sticker_px <= 0:
+    if sticker_px == 0:
         return None
 
     scale = sticker_size_in / float(sticker_px)
@@ -294,10 +283,10 @@ def compute_scale_from_sticker(sticker_mask, sticker_size_in=4.0):
 
     return scale
 
+
 # ---------------------------------------------------
 # DISTANCE UTILITIES
 # ---------------------------------------------------
-
 def euclidean(p1, p2):
     return np.linalg.norm(np.array(p1) - np.array(p2))
 
