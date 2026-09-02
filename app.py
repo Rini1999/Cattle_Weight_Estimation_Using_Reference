@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import joblib
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from segmentation import load_segmentation_models
 from keypoint_detection import load_keypoint_models
@@ -62,6 +62,53 @@ def load_all_models():
 ) = load_all_models()
 
 # ---------------------------------------------------
+# IMAGE STANDARDIZATION
+# ---------------------------------------------------
+
+def prepare_uploaded_image(uploaded_file):
+    """
+    Preserve original resolution.
+    Fix EXIF orientation.
+    Convert to RGB.
+    """
+    img = Image.open(uploaded_file)
+    img = ImageOps.exif_transpose(img)
+    img = img.convert("RGB")
+    return img
+
+
+def check_image_quality(img, view_name):
+    """
+    Warn users if the uploaded image appears compressed or resized.
+    Does NOT resize the image.
+    """
+    width, height = img.size
+    megapixels = width * height / 1_000_000
+
+    warnings = []
+
+    if megapixels < 1.0:
+        warnings.append(
+            f"⚠️ {view_name} image resolution is very low ({width}×{height}). "
+            "Predictions may be inaccurate."
+        )
+
+    if width < 800 or height < 600:
+        warnings.append(
+            f"⚠️ {view_name} image appears resized or compressed."
+        )
+
+    aspect_ratio = width / height
+
+    if aspect_ratio < 0.4 or aspect_ratio > 3.5:
+        warnings.append(
+            f"⚠️ {view_name} image has an unusual aspect ratio ({aspect_ratio:.2f})."
+        )
+
+    return warnings
+
+
+# ---------------------------------------------------
 # UI
 # ---------------------------------------------------
 
@@ -69,8 +116,12 @@ st.title("Cattle Weight Estimator")
 
 st.write("""
 Upload:
-- one **SIDE view** image
-- one **REAR view** image
+
+- **One SIDE-view image**
+- **One REAR-view image**
+
+**Important:** Upload the original camera images whenever possible. Avoid screenshots,
+social media images, or compressed copies because they can reduce prediction accuracy.
 """)
 
 col1, col2 = st.columns(2)
@@ -86,25 +137,42 @@ rear_file = col2.file_uploader(
 )
 
 # ---------------------------------------------------
-# PREDICTION
+# LOAD IMAGES
 # ---------------------------------------------------
 
 if side_file and rear_file:
 
-    side_img = Image.open(side_file).convert("RGB")
-    rear_img = Image.open(rear_file).convert("RGB")
+    side_img = prepare_uploaded_image(side_file)
+    rear_img = prepare_uploaded_image(rear_file)
 
     col1.image(
         side_img,
-        caption="Side View",
-        use_container_width=True
+        caption=f"Side View ({side_img.size[0]} × {side_img.size[1]})",
+        width="stretch"
     )
 
     col2.image(
         rear_img,
-        caption="Rear View",
-        use_container_width=True
+        caption=f"Rear View ({rear_img.size[0]} × {rear_img.size[1]})",
+        width="stretch"
     )
+
+    # Show quality warnings
+    side_warnings = check_image_quality(side_img, "Side")
+    rear_warnings = check_image_quality(rear_img, "Rear")
+
+    if side_warnings or rear_warnings:
+        st.warning(
+            "The uploaded images may have been resized or compressed. "
+            "For best accuracy, upload the original camera images."
+        )
+
+        for msg in side_warnings + rear_warnings:
+            st.write(msg)
+
+    # ---------------------------------------------------
+    # PREDICTION
+    # ---------------------------------------------------
 
     if st.button("Predict Weight"):
 
@@ -128,11 +196,8 @@ if side_file and rear_file:
                 print("STEP 9: SIDE extraction completed.", flush=True)
 
             if side_feats is None:
-
-                st.error("Side-view feature extraction returned None.")
+                st.error("Side-view feature extraction failed.")
                 st.stop()
-
-            st.success("Side-view features extracted successfully.")
 
             # --------------------------------------------
             # REAR FEATURES
@@ -152,11 +217,8 @@ if side_file and rear_file:
                 print("STEP 11: REAR extraction completed.", flush=True)
 
             if rear_feats is None:
-
-                st.error("Rear-view feature extraction returned None.")
+                st.error("Rear-view feature extraction failed.")
                 st.stop()
-
-            st.success("Rear-view features extracted successfully.")
 
             # --------------------------------------------
             # DERIVED FEATURES
@@ -213,7 +275,7 @@ if side_file and rear_file:
             )
 
             # --------------------------------------------
-            # FEATURE DICTIONARY
+            # FEATURE VECTOR
             # --------------------------------------------
 
             feature_dict = {
@@ -303,29 +365,23 @@ if side_file and rear_file:
                 "volume_proxy_2": volume_proxy_2,
                 "girth_proxy_1": girth_proxy_1,
                 "girth_proxy_2": girth_proxy_2,
-
                 "compactness_side": compactness_side,
                 "compactness_rear": compactness_rear,
-
                 "area_balance_ratio": area_balance_ratio,
                 "shape_balance_ratio": shape_balance_ratio,
                 "aspect_balance_ratio": aspect_balance_ratio,
                 "eccentricity_balance": eccentricity_balance,
             }
 
-            # --------------------------------------------
-            # PREDICTION
-            # --------------------------------------------
-
             X = pd.DataFrame([feature_dict])
 
             print("STEP 12: Running CatBoost prediction...", flush=True)
 
-            pred = model.predict(X)[0]
+            prediction = model.predict(X)[0]
 
             print("STEP 13: Prediction completed.", flush=True)
 
-            st.success(f"Estimated Weight: {pred:.2f} kg")
+            st.success(f"### Estimated Weight: {prediction:.2f} kg")
 
         except Exception as e:
 
