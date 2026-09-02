@@ -16,6 +16,7 @@ import torch
 from PIL import ImageOps
 from torchvision.transforms.functional import pil_to_tensor
 from fastai.vision.all import load_learner
+from torchvision.transforms import ToTensor
 
 # ---------------------------------------------------
 # SETTINGS
@@ -87,8 +88,8 @@ def get_segmentation_masks(model, image, view_type):
         print("Preparing FastAI image...", flush=True)
 
         # IMPORTANT:
-        # Keep tensor as BYTE (0-255).
-        x = pil_to_tensor(image_resized).unsqueeze(0).to(device)
+        # Convert PIL image to float32 tensor in [0,1]
+        x = ToTensor()(image_resized).unsqueeze(0).to(device)
 
         print(f"Input tensor dtype = {x.dtype}", flush=True)
         print(f"Input tensor shape = {x.shape}", flush=True)
