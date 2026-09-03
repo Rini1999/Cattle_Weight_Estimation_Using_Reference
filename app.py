@@ -9,6 +9,13 @@ from segmentation import load_segmentation_models
 from keypoint_detection import load_keypoint_models
 from feature_extraction import extract_features
 
+import importlib.metadata as md
+
+st.write("fastai", md.version("fastai"))
+st.write("fastcore", md.version("fastcore"))
+st.write("fasttransform", md.version("fasttransform"))
+st.stop()
+
 # ---------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------
