@@ -1,4 +1,11 @@
 import streamlit as st
+import importlib.metadata as md
+
+st.write("fastai", md.version("fastai"))
+st.write("fastcore", md.version("fastcore"))
+st.write("fasttransform", md.version("fasttransform"))
+st.stop()
+
 import numpy as np
 import pandas as pd
 import joblib
@@ -8,13 +15,6 @@ from PIL import Image, ImageOps
 from segmentation import load_segmentation_models
 from keypoint_detection import load_keypoint_models
 from feature_extraction import extract_features
-
-import importlib.metadata as md
-
-st.write("fastai", md.version("fastai"))
-st.write("fastcore", md.version("fastcore"))
-st.write("fasttransform", md.version("fasttransform"))
-st.stop()
 
 # ---------------------------------------------------
 # PAGE CONFIG
