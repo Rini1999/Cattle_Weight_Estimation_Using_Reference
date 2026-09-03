@@ -12,3 +12,6 @@ matplotlib==3.10.9
 fastai==2.8.7
 scipy==1.15.3
 tqdm==4.67.3
+fastcore==1.8.12
+fastdownload==0.0.7
+fasttransform==0.0.2
