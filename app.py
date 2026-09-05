@@ -1,11 +1,6 @@
 import streamlit as st
 import importlib.metadata as md
 
-st.write("fastai", md.version("fastai"))
-st.write("fastcore", md.version("fastcore"))
-st.write("fasttransform", md.version("fasttransform"))
-st.stop()
-
 import numpy as np
 import pandas as pd
 import joblib
