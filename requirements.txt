@@ -16,3 +16,4 @@ fastcore==1.13.2
 fasttransform==0.0.2
 fastdownload==0.0.7
 fastprogress==1.1.6
+plum-dispatch==2.9.0
